@@ -173,6 +173,7 @@ namespace Plugin {
         Core::hresult LogApplicationEvent(const string& eventName, const string& eventValue) override;
         Core::hresult UploadReport() override;
         Core::hresult AbortReport() override;
+        Core::hresult Configure(string& configUrl, string& privacyMode, string& adobeSessionId);
 
         void InitializePowerManager();
         void onPowerModeChanged(const PowerState currentState, const PowerState newState);
@@ -186,6 +187,7 @@ namespace Plugin {
         void onReportUploadStatus(const char* status);
         void getPrivacyMode();
         void setRFCReportProfiles();
+        void notifyAdobeMediaSessionId(std::string& sessionId);
 #endif
 
     private:

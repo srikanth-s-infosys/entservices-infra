@@ -31,11 +31,14 @@
 #define RBUS_COMPONENT_NAME "TelemetryThunderPlugin"
 #define T2_ON_DEMAND_REPORT "Device.X_RDKCENTRAL-COM_T2.UploadDCMReport"
 #define T2_ABORT_ON_DEMAND_REPORT "Device.X_RDKCENTRAL-COM_T2.AbortDCMReport"
+#define RBUS_ADOBE_MEDIA_SESSIONID_NAME "Device.X_RDKCENTRAL-COM_AdobeAnalytics.MediaSessionId"
 #endif
+
 
 #define RFC_CALLERID "Telemetry"
 #define RFC_REPORT_PROFILES "Device.X_RDKCENTRAL-COM_T2.ReportProfiles"
 #define RFC_REPORT_DEFAULT_PROFILE_ENABLE "Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.Telemetry.FTUEReport.Enable"
+#define RFC_REPORT_CONFIG_URL "Device.DeviceInfo.X_RDKCENTRAL-COM_RFC.Feature.Telemetry.ConfigURL"
 #define T2_PERSISTENT_FOLDER "/opt/.t2reportprofiles/"
 #define DEFAULT_PROFILES_FILE "/etc/t2profiles/default.json"
 
@@ -248,7 +251,39 @@ namespace Plugin {
     {
         LOGINFO("Got %s rbus callback", methodName);
     }
-    
+
+    void TelemetryImplementation::notifyAdobeMediaSessionId(std::string& sessionId)
+    {
+        LOGINFO("AdobeAnalytics MediaSessionId is %s", sessionId.c_str());
+
+        if (RBUS_ERROR_SUCCESS != rbusHandleStatus)
+        {
+            rbusHandleStatus = rbus_open(&rbusHandle, RBUS_COMPONENT_NAME);
+        }
+
+        if (RBUS_ERROR_SUCCESS == rbusHandleStatus)
+        {
+            rbusValue_t value;
+            rbusSetOptions_t opts = {true, 0};
+
+            rbusValue_Init(&value);
+            rbusValue_SetString(value, sessionId.c_str());
+            int rc = rbus_set(rbusHandle, RBUS_ADOBE_MEDIA_SESSIONID_NAME, value, &opts);
+
+            if (rc != RBUS_ERROR_SUCCESS)
+            {
+                std::stringstream str;
+                str << "Failed to set property " << RBUS_ADOBE_MEDIA_SESSIONID_NAME << ": " << rc;
+                LOGERR("%s", str.str().c_str());
+            }
+
+            rbusValue_Release(value);
+        }
+        else
+        {
+            LOGERR("rbus_open failed with error code %d", rbusHandleStatus);
+        }
+    }
     
 #endif 
     
@@ -340,6 +375,54 @@ namespace Plugin {
         
         return result;
     }
+
+    Core::hresult TelemetryImplementation::Configure(string& configUrl,
+                                                 string& privacyMode,
+                                                 string& adobeSessionId)
+    {
+        LOGINFO("TelemetryImplementation::Configure: configUrl='%s', privacyMode='%s', adobeSessionId='%s'",
+                configUrl.c_str(), privacyMode.c_str(), adobeSessionId.c_str());
+
+        bool status = true;
+
+        // 1) Set ConfigURL via RFC
+        if (!configUrl.empty())
+        {
+            WDMP_STATUS wdmpStatus = setRFCParameter(
+                                    (char*)RFC_CALLERID,
+                                    RFC_REPORT_CONFIG_URL,
+                                    configUrl.c_str(),
+                                    WDMP_STRING);
+
+            if (wdmpStatus != WDMP_SUCCESS)
+            {
+                LOGERR("Failed to set %s: %d", RFC_REPORT_CONFIG_URL, wdmpStatus);
+                status = false;
+            }
+        }
+
+#ifdef HAS_RBUS
+        // 2) Update PrivacyMode via RBUS
+        if (!privacyMode.empty())
+        {
+            notifyT2PrivacyMode(privacyMode);
+        }
+
+        // 3) Update Adobe Media Session ID via RBUS
+        if (!adobeSessionId.empty())
+        {
+            notifyAdobeMediaSessionId(adobeSessionId);
+        }
+        #else
+        if (!privacyMode.empty() || !adobeSessionId.empty())
+        {
+            LOGERR("No RBUS support");
+            status = false;
+        }
+#endif
+
+        return status ? Core::ERROR_NONE : Core::ERROR_GENERAL;
+}
     
     void TelemetryImplementation::InitializePowerManager()
     {
